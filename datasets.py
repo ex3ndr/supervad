@@ -26,6 +26,7 @@ class PreprocessedAudioDataset(Dataset):
 
         # Source
         audio, _ = torchaudio.load(self.dir + "/" + self.keys[idx])
+        audio = audio[0]
 
         # Target
         target = torch.zeros(DATASET_SAMPLE_LENGTH * TOKENS_PER_SECOND)

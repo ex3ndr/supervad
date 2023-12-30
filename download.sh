@@ -3,7 +3,7 @@ set -e
 BUCKET_URL="https://datasets.korshakov.com"
 
 FILES=(
-    # "supervad-1/vad_test"
+    "supervad-1/vad_test"
     "supervad-1/vad_train"
 )
 

@@ -76,10 +76,13 @@ def spectogram(audio):
 
     # Log
     log_spec = torch.clamp(mel_spec, min=1e-10).log10()
-    log_spec = torch.maximum(log_spec, log_spec.max() - 8.0)
-    log_spec = (log_spec + 4.0) / 4.0
     
     return log_spec
+
+def naive_normalize_spectogram(audio):
+    audio = torch.maximum(audio, audio.max() - 8.0)
+    audio = (audio + 4.0) / 4.0
+    return audio
 
 def sliding_window(tensor, window_size, step):
 

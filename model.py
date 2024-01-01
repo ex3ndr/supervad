@@ -146,7 +146,7 @@ class SuperVAD(nn.Module):
 
         # Regression
         y = self.output(y)
-        y = F.gelu(y)
+        y = self.activation(y)
 
         # Return probability
         return y

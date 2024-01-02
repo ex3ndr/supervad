@@ -43,22 +43,55 @@ def plot_specgram(waveform, sample_rate=16000, title="Spectrogram", xlim=(0,5)):
             axes[c].set_xlim(xlim)
     figure.suptitle(title)
 
-def plot_labels(waveform, sample_rate=50, title="Labels", xlim=(0,5)):
+def plot_labels(waveform, sample_rate=50, title="Labels", xlim=(0,5), threshold=None):
     waveform = waveform.numpy()
 
     num_frames = waveform.shape[0]
     time_axis = torch.arange(0, num_frames) / sample_rate
 
-    figure, axes = plt.subplots(1, 1)
-    axes = [axes]
-    axes[0].plot(time_axis, waveform, linewidth=1)
-    axes[0].grid(True)
-    axes[0].set_xlim(xlim)
-    axes[0].set_ylim(-0.25,1.25)
+    figure, ax = plt.subplots(1, 1)
+    ax.plot(time_axis, waveform, linewidth=1)
+    ax.grid(True)
+    ax.set_xlim(xlim)
+    ax.set_ylim(-0.25,1.25)
+
+    # Highlight intervals where values are higher than the threshold
+    if threshold is not None:
+        ax.axhline(y=threshold, color='green', linestyle='--')
+        above_threshold = waveform > threshold
+        for start, stop in contiguous_regions(above_threshold):
+            ax.axvspan(time_axis[start], time_axis[stop], color='green', alpha=0.3)
+    
     figure.suptitle(title)
 
 def play_audio(waveform):
     display(Audio(data=waveform, rate=16000))
+
+def contiguous_regions(condition):
+    """
+    Finds contiguous True regions of the boolean array "condition".
+    This function returns a 2D array where the first column is the
+    start index of the region and the second column is the end index.
+    """
+    # Find the indices of changes in "condition"
+    d = np.diff(condition)
+    idx, = d.nonzero() 
+
+    # We need to start things after the change in "condition". Therefore,
+    # we'll shift the index by 1 to the right.
+    idx += 1
+
+    if condition[0]:
+        # If the start of condition is True prepend a 0
+        idx = np.r_[0, idx]
+
+    if condition[-1]:
+        # If the end of condition is True, append the length of the array
+        idx = np.r_[idx, condition.size - 1] 
+
+    # Reshape the result into two columns
+    idx.shape = (-1, 2)
+    return idx
 
 #
 # 

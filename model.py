@@ -68,7 +68,7 @@ class MultiHeadAttention(nn.Module):
         v = v.view(B, T, self.config.attn_heads, C // self.config.attn_heads).transpose(1, 2) # (B, nh, T, hs)
 
         # Dot product attention
-        y = torch.nn.functional.scaled_dot_product_attention(q, k, v, attn_mask=None, dropout_p=self.config.dropout if self.training else 0, is_causal=True)
+        y = torch.nn.functional.scaled_dot_product_attention(q, k, v, attn_mask=None, dropout_p=self.config.dropout if self.training else 0.0, is_causal=True)
         y = y.transpose(1, 2).contiguous().view(B, T, C) # re-assemble all head outputs side by side
 
         # Output
@@ -107,6 +107,9 @@ class SuperVAD(nn.Module):
         if config is None:
             config = Config()
 
+        # Input normalization
+        self.input_ln = nn.LayerNorm((config.ctx_width, config.ctx_length * 2), bias=False)
+
         # Convolutions
         self.conv1 = nn.Conv1d(config.ctx_width, config.attn_features, kernel_size=3, padding=1)
         self.conv2 = nn.Conv1d(config.attn_features, config.attn_features, kernel_size=3, stride=2, padding=1)
@@ -127,8 +130,11 @@ class SuperVAD(nn.Module):
         
     def forward(self, x):
 
+        # Normalize input
+        y = self.input_ln(x)
+
         # Convolutions
-        y = F.gelu(self.conv1(x))
+        y = F.gelu(self.conv1(y))
         y = F.gelu(self.conv2(y))
         y = y.permute(0, 2, 1) # LogMel has (batch, mels, ctx) instead of (batch, ctx, mels). But why not to do so before convolutions?
 

@@ -1,6 +1,7 @@
 import os
 import random
 import time
+import math
 from contextlib import nullcontext
 
 # Hacks to make DP work on consumer GPU
@@ -25,13 +26,17 @@ from model import SuperVAD, Config
 # 
 
 init_from = "scratch" # or resume 
-experiment = "supervad_winit_2v"
+experiment = "supervad_lr_decay_1v"
 device = "cuda:0"
 model_config = Config()
 train_batch = 16
 train_epochs = 120
 train_epoch_samples = 100000
 train_lr = 1e-4
+train_lr_min = 1e-5 # minimum learning rate, should be ~= train_lr/10 per Chinchilla
+train_lr_decay = True
+train_lr_warmup = 6000 # ~ 1 epoch
+train_lr_decay = 600000 # ~ 100 epochs
 train_weight_decay = 1e-2
 train_betas = (0.9, 0.95)
 augment_time_masking = 5
@@ -157,6 +162,8 @@ print(f"Decayed parameter tensors: {len(decay_params)}, with {num_decay_params:,
 print(f"Non-decayed parameter tensors: {len(nodecay_params)}, with {num_nodecay_params:,} parameters")
 
 epoch = 0
+iter = 0
+current_lr = train_lr
 optimizer = torch.optim.AdamW(optim_groups, lr=train_lr, betas=train_betas, fused=True)
 
 #
@@ -171,16 +178,18 @@ loader = DataLoader(dataset_train, batch_size=train_batch, num_workers=8, sample
 # 
 
 def save():
-    torch.save({ 'model_state_dict': base.state_dict(), 'optimizer_state_dict': optimizer.state_dict(),'epoch': epoch},  f'./checkpoints/{experiment}.pt')
-    torch.save({ 'model_state_dict': base.state_dict(), 'optimizer_state_dict': optimizer.state_dict(),'epoch': epoch},  f'./checkpoints/{experiment}_{epoch}.pt')
+    torch.save({ 'model_state_dict': base.state_dict(), 'optimizer_state_dict': optimizer.state_dict(), 'epoch': epoch, 'iter': iter },  f'./checkpoints/{experiment}.pt')
+    torch.save({ 'model_state_dict': base.state_dict(), 'optimizer_state_dict': optimizer.state_dict(), 'epoch': epoch, 'iter': iter},  f'./checkpoints/{experiment}_{epoch}.pt')
     
 def load():
     global epoch
+    global iter
     checkpoint = torch.load(f'./checkpoints/{experiment}.pt')
     base.load_state_dict(checkpoint['model_state_dict'])
     optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
     epoch = checkpoint['epoch']
-    print(f'Loaded at #{epoch}')
+    iter = checkpoint['iter']
+    print(f'Loaded at #{epoch}/{iter}')
 
 # Do load if needed
 if init_from == "resume":
@@ -221,6 +230,23 @@ print(validate())
 #
 # Training
 #
+
+def resolve_train_lr(it):
+    if train_lr_decay:
+        # 1) linear warmup for train_lr_warmup steps
+        if it < train_lr_warmup:
+            return train_lr * (it + 1) / train_lr_warmup
+        # 2) if it > train_lr_decay, return min learning rate
+        if it > train_lr_decay:
+            return train_lr_min
+        
+        # 3) cosine learning rate decay
+        decay_ratio = (it - train_lr_warmup) / (train_lr_decay - train_lr_warmup)
+        assert 0 <= decay_ratio <= 1
+        coeff = 0.5 * (1.0 + math.cos(math.pi * decay_ratio)) # coeff ranges 0..1
+        return train_lr_min + coeff * (train_lr - train_lr_min)
+    else:
+        return train_lr
     
 def train_batch(samples, labels):
     # Switch to training
@@ -243,11 +269,23 @@ def train_batch(samples, labels):
     return loss.detach(), labels.shape[0]
 
 def train_epoch():
+    global current_lr
+    global iter
     total_loss = torch.tensor(0.0).to(device)
     total_items = torch.tensor(0).to(device)
     for i, data in enumerate(loader):
         samples, labels = data
+
+        # Update learning rate
+        current_lr = resolve_train_lr(iter)
+        for param_group in optimizer.param_groups:
+            param_group['lr'] = current_lr
+
+        # Train
         l, c = train_batch(samples, labels)
+
+        # Stats
+        iter = iter + 1
         total_loss = total_loss + l
         total_items = total_items + c
     return total_loss / total_items
@@ -272,6 +310,7 @@ for i in range(epoch, train_epochs):
     print(f'#{epoch}: {training_loss}/{validation_loss} in {duration} ms')
     writer.add_scalar('training loss', training_loss, epoch)
     writer.add_scalar('validation loss', validation_loss, epoch)
+    writer.add_scalar('learning rate', current_lr, epoch)
 
     # Save
     save()

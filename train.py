@@ -13,9 +13,10 @@ import torch.nn.functional as F
 from torch import nn
 from torch.utils.tensorboard import SummaryWriter
 from torch.utils.data import DataLoader
+import torchaudio.transforms as T
 
 # Local
-from utils import spectogram, sliding_window
+from utils import spectogram, spectogram_raw, spectogram_mel_log, sliding_window
 from datasets import preprocessed_audio_dataset, sample_dataset
 from model import SuperVAD, Config
 
@@ -24,15 +25,18 @@ from model import SuperVAD, Config
 # 
 
 init_from = "scratch" # or resume 
-experiment = "vad_lnorm_1e4s"
+experiment = "supervad_winit_2v"
 device = "cuda:0"
 model_config = Config()
 train_batch = 16
 train_epochs = 120
 train_epoch_samples = 100000
-train_lr = 1e-3
+train_lr = 1e-4
 train_weight_decay = 1e-2
 train_betas = (0.9, 0.95)
+augment_time_masking = 5
+augment_freq_masking = 5
+augment_rescale= (0.9, 1.1)
 validation_batch = 64
 
 #
@@ -68,6 +72,9 @@ writer = SummaryWriter(f'runs/{experiment}')
 dataset_train = preprocessed_audio_dataset('./datasets/supervad-1/vad_train')
 dataset_test = preprocessed_audio_dataset('./datasets/supervad-1/vad_test')
 
+time_masking = T.TimeMasking(time_mask_param=augment_time_masking)
+freq_masking = T.FrequencyMasking(freq_mask_param=augment_freq_masking)
+
 def prepare_labels(labels):    
 
     # Sliding window
@@ -83,13 +90,28 @@ def prepare_labels(labels):
     
     return labels
 
-def prepare_samples(samples):
+def prepare_samples(samples, train=True):
 
     # Spectogram
     samples = samples.to(device, non_blocking=True)
-    samples = spectogram(samples)
+
+    # Randomly rescale
+    if train:
+        scaling_factors = augment_rescale[0] + torch.rand(samples.shape[0], 1, device=device) * (augment_rescale[1] - augment_rescale[0])
+        samples = samples * scaling_factors
+    
+    samples = spectogram_raw(samples)
     # samples = samples.to(device, non_blocking=True)
 
+    # SpecAugment
+    # if train:
+    #     samples = time_masking(samples)
+    #     samples = freq_masking(samples)
+
+    # Log Mel
+    samples = spectogram_mel_log(samples)
+    # samples = spectogram(samples)
+    
     # Sliding window
     samples = sliding_window(samples, model_config.ctx_length * 2, 2)
 
@@ -178,7 +200,7 @@ random.seed(None)
 validation_labels = torch.stack(validation_labels)
 validation_labels = prepare_labels(validation_labels)
 validation_samples = torch.stack(validation_samples)
-validation_samples = prepare_samples(validation_samples)
+validation_samples = prepare_samples(validation_samples, train=False)
 
 # Validation function
 def validate():
@@ -192,7 +214,10 @@ def validate():
             prediction = vad(validation_samples)
         loss = F.mse_loss(validation_labels, prediction.float())
         return loss.item() / validation_labels.shape[0]
-    
+
+# Test validation
+print(validate())
+
 #
 # Training
 #

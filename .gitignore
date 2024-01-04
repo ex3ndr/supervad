@@ -6,3 +6,4 @@ checkpoints
 *.onnx
 *.pt
 *.pth
+evaluation.wav

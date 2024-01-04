@@ -99,18 +99,25 @@ def contiguous_regions(condition):
 
 mel_filters = torch.from_numpy(np.load("./mel_filters.npz", allow_pickle=False)["mel_80"])
 
-def spectogram(audio):
+
+def spectogram_raw(audio):
     window = torch.hann_window(400, device=audio.device)
     stft = torch.stft(audio, 400, 160, window=window, return_complex=False)
     magnitudes = torch.sum((stft ** 2), dim=-1)[..., :-1]
+    return magnitudes
 
+def spectogram_mel_log(magnitudes):
+    
     # Mel
-    mel_spec = mel_filters.to(audio.device) @ magnitudes
+    mel_spec = mel_filters.to(magnitudes.device) @ magnitudes
 
     # Log
     log_spec = torch.clamp(mel_spec, min=1e-10).log10()
     
     return log_spec
+
+def spectogram(audio):
+    return spectogram_mel_log(spectogram_raw(audio))
 
 def naive_normalize_spectogram(audio):
     audio = torch.maximum(audio, audio.max() - 8.0)
